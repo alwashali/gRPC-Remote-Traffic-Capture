@@ -1,0 +1,15 @@
+syntax = "proto3";
+package service;
+
+message Packet{
+    bytes data = 1; 
+    bytes Seralizedcapturreinfo = 2; 
+}
+
+message Empty {
+    string okay = 1;
+}
+
+service RemoteCaputre {
+    rpc Capture (stream Packet) returns (Empty) {}
+}
