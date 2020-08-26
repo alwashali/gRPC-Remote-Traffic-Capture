@@ -1,5 +1,5 @@
 # gRPC - Remote Traffic Caputre
-Remote trafffic caputre using GRPC and golang
+Remote trafffic caputre using gRPC and golang
 
 # Usage:
 
