@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	service "remotecaputre/service"
 	"time"
+
+	"github.com/alwashali/gRPC-Remote-Traffic-Capture/service"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -23,10 +24,10 @@ var (
 	err         error
 	timeout     time.Duration = -1 * time.Second
 	handle      *pcap.Handle
-	packetcount int32 = 0
-	packetchan        = make(chan gopacket.Packet, 1000)
+	packetchan  = make(chan gopacket.Packet, 1000)
 )
 
+// capture packets and pass through ch channel
 func capture(ch chan gopacket.Packet) {
 	handle, err = pcap.OpenLive(deviceName, snapshotLen, promiscuous, timeout)
 	if err != nil {
@@ -36,7 +37,7 @@ func capture(ch chan gopacket.Packet) {
 	defer handle.Close()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	fmt.Println("sending packets....")
+
 	for packet := range packetSource.Packets() {
 		ch <- packet
 	}
@@ -44,7 +45,7 @@ func capture(ch chan gopacket.Packet) {
 
 func main() {
 
-	networkCard := flag.String("i", "", "-i eth0")
+	networkCard := flag.String("i", "eth0", "-i wlo1")
 	serverIP := flag.String("r", "127.0.0.1", "-r 192.168.1.20")
 
 	flag.Parse()
@@ -56,24 +57,34 @@ func main() {
 
 	if *networkCard != "" {
 		deviceName = *networkCard
-		conn, err := grpc.Dial(*serverIP+":9000", grpc.WithInsecure())
+		conn, err := grpc.Dial(*serverIP+":9000", grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("can not connect with server %v", err)
 		}
 		defer conn.Close()
 
-		// create GRPC stream
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		// create gRPC client
 		client := service.NewRemoteCaputreClient(conn)
 
-		stream, err := client.Capture(context.Background())
+		hostname, _ := os.Hostname()
+		fmt.Println(hostname)
+		e := service.EndpointInfo{IPAddress: "localhost", Hostname: hostname}
+		_, err = client.GetReady(ctx, &e)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		ServerStream, err := client.Capture(context.Background())
 		if err != nil {
 			log.Fatalf("open stream error %v", err)
 		}
-		defer stream.CloseSend()
-
+		defer ServerStream.CloseSend()
 		//capture and put in channel
 		go capture(packetchan)
-
+		fmt.Printf("\nSending Packets ... \n")
 		for {
 
 			select {
@@ -89,16 +100,15 @@ func main() {
 					}
 
 					pkt := service.Packet{
-						Data: packet.Data(),
+						Data:                  packet.Data(),
 						Seralizedcapturreinfo: byteArray,
 					}
 
 					// Send to Server
-					if err := stream.Send(&pkt); err != nil {
+					if err := ServerStream.Send(&pkt); err != nil {
 						log.Fatalf("can not send %v", err)
 					}
-					packetcount++
-					fmt.Printf("Sending...\nPacketCount: %d ", packetcount)
+
 				}
 
 			default:

@@ -6,10 +6,17 @@ message Packet{
     bytes Seralizedcapturreinfo = 2; 
 }
 
+message EndpointInfo{
+    string hostname = 1;
+    string IPAddress = 2;
+}
+
 message Empty {
     string okay = 1;
 }
 
 service RemoteCaputre {
     rpc Capture (stream Packet) returns (Empty) {}
+    rpc GetReady(EndpointInfo) returns (Empty)  {}
+
 }

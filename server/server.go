@@ -6,66 +6,134 @@ import (
 	"log"
 	"net"
 	"os"
-	"remotecaputre/service"
 	"time"
 
+	"github.com/alwashali/gRPC-Remote-Traffic-Capture/service"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/pcapgo"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
-type Server struct{}
+type Server struct {
+	service.UnimplementedRemoteCaputreServer
+}
 
 var (
 	snapshotLen uint32 = 1024
 	err         error
 	timeout     time.Duration = -1 * time.Second
 	handle      *pcap.Handle
-	packetCount int = 0
 )
+
+type endpoint struct {
+	Hostname      string
+	IPAddress     string
+	TraceFileName string
+	Packetcount   int
+	StreamingNow  bool
+}
+
+var endpoints []endpoint
+
+func (s *Server) GetReady(ctx context.Context, info *service.EndpointInfo) (*service.Empty, error) {
+
+	fmt.Printf("%s is connecting ... \n", info.IPAddress)
+
+	_, Found := s.GetEndpointInfo("localhost")
+	if !Found {
+		e := endpoint{
+			Hostname:      info.Hostname,
+			IPAddress:     info.IPAddress,
+			TraceFileName: info.Hostname + "_" + info.IPAddress,
+			Packetcount:   0,
+		}
+
+		//Append new endpoint connection to endpoints slice
+		endpoints = append(endpoints, e)
+		fmt.Printf("%s added\n", info.Hostname)
+
+	}
+	return &service.Empty{}, nil
+}
+
+func (s *Server) GetEndpointInfo(addr string) (int, bool) {
+
+	for i, e := range endpoints {
+		if e.IPAddress == addr {
+			return i, true
+		}
+
+	}
+	return 0, false
+}
 
 func (s *Server) Capture(srv service.RemoteCaputre_CaptureServer) error {
 
-	log.Println("start new server")
-
+	n, Found := s.GetEndpointInfo("localhost")
+	if !Found {
+		log.Panic()
+		//handle properly
+	}
 	file, err := os.OpenFile(
-		"test.pcap",
-		os.O_WRONLY|os.O_TRUNC|os.O_CREATE,
-		0666,
+		endpoints[n].TraceFileName+time.Now().Format(time.RFC850),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
 	)
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer file.Close()
 
+	//go packet writer
 	w := pcapgo.NewWriter(file)
 	w.WriteFileHeader(snapshotLen, layers.LinkTypeEthernet)
 
-	for {
+	StreamEnd := make(chan bool)
+	endpoints[n].StreamingNow = true
+	go func() {
+		for {
 
-		// receive data from stream
-		pkt, err := srv.Recv()
-		if err != nil {
-			panic(err)
+			// receive data from stream
+			pkt, err := srv.Recv()
+
+			// if err == io.EOF {
+			// 	//to print a message about the stream end
+			// 	StreamEnd <- true
+			// 	return
+			// }
+			if err != nil {
+				//log.Fatalf("Failed to receive the packet : %v", err)
+				StreamEnd <- true
+				break
+			}
+
+			// empty CaptureInfo struct
+			metadata := gopacket.PacketMetadata{}
+			err = json.Unmarshal(pkt.Seralizedcapturreinfo, &metadata)
+			if err != nil {
+				fmt.Printf("Error unmarshal the packet %s \n", err)
+				continue
+			}
+
+			err = w.WritePacket(metadata.CaptureInfo, pkt.Data)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			endpoints[n].Packetcount++
+
+			fmt.Printf("Received...\nPacketCount: %d ", endpoints[n].Packetcount)
+
 		}
 
-		// empty CaptureInfo struct
-		metadata := gopacket.PacketMetadata{}
-		err = json.Unmarshal(pkt.Seralizedcapturreinfo, &metadata)
-		if err != nil {
-			fmt.Println(err)
-		}
+	}()
 
-		err = w.WritePacket(metadata.CaptureInfo, pkt.Data)
-		if err != nil {
-			fmt.Println(err)
-		}
-		packetCount++
-		fmt.Printf("Received...\nPacketCount: %d ", packetCount)
-
-	}
+	<-StreamEnd
+	log.Printf("stream ended from %s \n", endpoints[n].IPAddress)
+	endpoints[n].StreamingNow = false
+	return nil
 
 }
 
@@ -74,10 +142,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-
 	grpcserver := grpc.NewServer()
 	service.RegisterRemoteCaputreServer(grpcserver, &Server{})
-
 	fmt.Println("Server started. ")
 	if err := grpcserver.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
