@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alwashali/gRPC-Remote-Traffic-Capture/service"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
 )
 
 type Server struct {
@@ -31,6 +33,7 @@ var (
 type endpoint struct {
 	Hostname      string
 	IPAddress     string
+	Interface     string
 	TraceFileName string
 	Packetcount   int
 	StreamingNow  bool
@@ -40,15 +43,17 @@ var endpoints []endpoint
 
 func (s *Server) GetReady(ctx context.Context, info *service.EndpointInfo) (*service.Empty, error) {
 
-	fmt.Printf("%s is connecting ... \n", info.IPAddress)
+	fmt.Printf("%s is connecting ... \n", info.IPaddress)
 
-	_, Found := s.GetEndpointInfo("localhost")
+	_, Found := s.GetEndpointInfo(info.IPaddress)
 	if !Found {
 		e := endpoint{
-			Hostname:      info.Hostname,
-			IPAddress:     info.IPAddress,
-			TraceFileName: info.Hostname + "_" + info.IPAddress,
-			Packetcount:   0,
+			Hostname:  info.Hostname,
+			IPAddress: info.IPaddress,
+			TraceFileName: info.Hostname +
+				"-" + info.Interface +
+				"(" + info.IPaddress + ") ",
+			Packetcount: 0,
 		}
 
 		//Append new endpoint connection to endpoints slice
@@ -71,8 +76,11 @@ func (s *Server) GetEndpointInfo(addr string) (int, bool) {
 }
 
 func (s *Server) Capture(srv service.RemoteCaputre_CaptureServer) error {
-
-	n, Found := s.GetEndpointInfo("localhost")
+	ctx := srv.Context()
+	p, _ := peer.FromContext(ctx)
+	ipaddress := strings.Split(p.Addr.String(), ":")[0]
+	fmt.Println("capture started ", ipaddress)
+	n, Found := s.GetEndpointInfo(ipaddress)
 	if !Found {
 		log.Panic()
 		//handle properly

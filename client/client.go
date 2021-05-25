@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 
@@ -43,6 +45,49 @@ func capture(ch chan gopacket.Packet) {
 	}
 }
 
+// get ip address of a specific network interface
+func GetIpByInterface(NetwrokCard string) (string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+
+	for _, iface := range ifaces {
+
+		if iface.Name == NetwrokCard {
+
+			if iface.Flags&net.FlagUp == 0 {
+				continue // interface down
+			}
+			if iface.Flags&net.FlagLoopback != 0 {
+				continue // loopback interface
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				return "", err
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip == nil || ip.IsLoopback() {
+					continue
+				}
+				ip = ip.To4()
+				if ip == nil {
+					continue // not an ipv4 address
+				}
+				return ip.String(), nil
+			}
+		}
+	}
+	return "", errors.New("are you connected to the network?")
+}
+
 func main() {
 
 	networkCard := flag.String("i", "eth0", "-i wlo1")
@@ -70,8 +115,12 @@ func main() {
 		client := service.NewRemoteCaputreClient(conn)
 
 		hostname, _ := os.Hostname()
-		fmt.Println(hostname)
-		e := service.EndpointInfo{IPAddress: "localhost", Hostname: hostname}
+		IP, err := GetIpByInterface(*networkCard)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		e := service.EndpointInfo{IPaddress: IP, Hostname: hostname, Interface: *networkCard}
 		_, err = client.GetReady(ctx, &e)
 		if err != nil {
 			fmt.Println(err)

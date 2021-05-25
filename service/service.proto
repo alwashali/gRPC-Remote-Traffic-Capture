@@ -1,14 +1,16 @@
 syntax = "proto3";
 package service;
+option go_package = "service/;service";
 
 message Packet{
-    bytes data = 1; 
+    bytes Data = 1; 
     bytes Seralizedcapturreinfo = 2; 
 }
 
 message EndpointInfo{
-    string hostname = 1;
-    string IPAddress = 2;
+    string Hostname = 1;
+    string IPaddress = 2;
+    string Interface = 3;
 }
 
 message Empty {
