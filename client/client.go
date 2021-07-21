@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/alwashali/gRPC-Remote-Traffic-Capture/service"
@@ -26,7 +25,8 @@ var (
 	err         error
 	timeout     time.Duration = -1 * time.Second
 	handle      *pcap.Handle
-	packetchan  = make(chan gopacket.Packet, 1000)
+	packetchan         = make(chan gopacket.Packet, 1000)
+	OS          string = ""
 )
 
 // capture packets and pass through ch channel
@@ -47,61 +47,103 @@ func capture(ch chan gopacket.Packet) {
 
 // get ip address of a specific network interface
 func GetIpByInterface(NetwrokCard string) (string, error) {
-	ifaces, err := net.Interfaces()
+
+	devices, err := pcap.FindAllDevs()
 	if err != nil {
-		return "", err
+		log.Fatal(err)
 	}
 
-	for _, iface := range ifaces {
+	for _, device := range devices {
+		if device.Name == NetwrokCard {
+			for _, i := range device.Addresses {
+				ip := i.IP
+				//if ip is not an IPv4 address, To4 returns nil
+				err := ip.To4()
+				if err != nil {
+					return ip.String(), nil
 
-		if iface.Name == NetwrokCard {
+				}
 
-			if iface.Flags&net.FlagUp == 0 {
-				continue // interface down
-			}
-			if iface.Flags&net.FlagLoopback != 0 {
-				continue // loopback interface
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				return "", err
-			}
-			for _, addr := range addrs {
-				var ip net.IP
-				switch v := addr.(type) {
-				case *net.IPNet:
-					ip = v.IP
-				case *net.IPAddr:
-					ip = v.IP
-				}
-				if ip == nil || ip.IsLoopback() {
-					continue
-				}
-				ip = ip.To4()
-				if ip == nil {
-					continue // not an ipv4 address
-				}
-				return ip.String(), nil
 			}
 		}
+
 	}
-	return "", errors.New("are you connected to the network?")
+	return "", nil
+}
+
+// return card raw name by number shown in -l option
+func NICByNumber(opt int) (string, error) {
+
+	count := 0
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, device := range devices {
+		count++
+		if count == opt {
+			return device.Name, nil
+		}
+	}
+
+	return "", fmt.Errorf("Interface not found")
+
 }
 
 func main() {
+	var listNICsOption bool
 
-	networkCard := flag.String("i", "eth0", "-i wlo1")
+	networkCard := flag.Int("i", 0, "try -l before")
 	serverIP := flag.String("r", "127.0.0.1", "-r 192.168.1.20")
+	flag.BoolVar(&listNICsOption, "l", false, "list network cards")
+	if runtime.GOOS == "windows" {
+		OS = "Windows"
+	} else {
+		OS = "Linux"
+	}
 
 	flag.Parse()
+
 	if len(os.Args) < 3 {
-		fmt.Printf("\nUsage:\n-i: Network Card \n-r: Remote server IP\n")
-		fmt.Printf("Example: client -i eth0 -r 192.168.100.1\n\n")
+		fmt.Println("Usage:")
+		fmt.Println("	-i: Network Card Number, see option -l")
+		fmt.Println("	-r: Remote server IP")
+		fmt.Println("	-l: List NIC names (Useful for Windows)")
+		fmt.Printf("\nExample: client -i 2 -r 192.168.100.1\n\n")
 		os.Exit(0)
 	}
 
-	if *networkCard != "" {
-		deviceName = *networkCard
+	if listNICsOption {
+		count := 0
+		devices, err := pcap.FindAllDevs()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Devices found:")
+
+		if OS == "Windows" {
+
+			for _, device := range devices {
+				count++
+				fmt.Printf("\n(%d)- %s:%s", count, device.Description, device.Name)
+			}
+		} else {
+			for _, device := range devices {
+				count++
+				fmt.Printf("\n(%d)- %s", count, device.Name)
+			}
+
+		}
+
+	}
+
+	if *networkCard > 0 {
+		deviceName, err = NICByNumber(*networkCard)
+		if err != nil {
+			panic("No interface found")
+		}
+
 		conn, err := grpc.Dial(*serverIP+":9000", grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
 			log.Fatalf("can not connect with server %v", err)
@@ -115,12 +157,14 @@ func main() {
 		client := service.NewRemoteCaputreClient(conn)
 
 		hostname, _ := os.Hostname()
-		IP, err := GetIpByInterface(*networkCard)
+		IP, err := GetIpByInterface(deviceName)
+		fmt.Println(IP)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println(err.Error())
+			os.Exit(1)
 		}
 
-		e := service.EndpointInfo{IPaddress: IP, Hostname: hostname, Interface: *networkCard}
+		e := service.EndpointInfo{IPaddress: IP, Hostname: hostname, Interface: deviceName}
 		_, err = client.GetReady(ctx, &e)
 		if err != nil {
 			fmt.Println(err)
