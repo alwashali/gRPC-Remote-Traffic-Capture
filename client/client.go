@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/alwashali/gRPC-Remote-Traffic-Capture/service"
@@ -18,6 +22,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+type exception struct {
+	host string
+	ip   []string
+}
+
 var (
 	deviceName  string = ""
 	snapshotLen int32  = 65535
@@ -27,7 +36,35 @@ var (
 	handle      *pcap.Handle
 	packetchan         = make(chan gopacket.Packet, 1000)
 	OS          string = ""
+	except      []exception
 )
+
+func initializeExceptions(serverIP string) {
+	resp, err := http.Get(fmt.Sprintf("http://%s:8080/exceptions.list", serverIP))
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	defer resp.Body.Close()
+
+	// start with capture server
+	e := exception{
+		host: serverIP,
+	}
+	except = append(except, e)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		e := exception{
+			host: line,
+		}
+		except = append(except, e)
+
+	}
+
+	bulkResolver()
+}
 
 // capture packets and pass through ch channel
 func capture(ch chan gopacket.Packet) {
@@ -36,6 +73,24 @@ func capture(ch chan gopacket.Packet) {
 		fmt.Printf("Error opening device %s: %v", deviceName, err)
 		os.Exit(1)
 	}
+
+	sb := strings.Builder{}
+
+	for _, e := range except {
+		for _, ip := range e.ip {
+			sb.WriteString(fmt.Sprintf("not host %s", ip))
+			sb.WriteString(" and ")
+		}
+
+	}
+	filterString := sb.String()
+	filterString = strings.TrimSuffix(filterString, " and ")
+
+	err = handle.SetBPFFilter(filterString)
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	defer handle.Close()
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
@@ -91,6 +146,28 @@ func NICByNumber(opt int) (string, error) {
 
 }
 
+func bulkResolver() {
+	r := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: time.Millisecond * time.Duration(10000),
+			}
+			return d.DialContext(ctx, network, "8.8.8.8:53")
+		},
+	}
+
+	for i := 0; i < len(except); i++ {
+
+		ip, _ := r.LookupHost(context.Background(), except[i].host)
+		except[i].ip = ip
+		fmt.Printf("%s %s\n", except[i].host, except[i].ip)
+		time.Sleep(50 * time.Millisecond)
+
+	}
+
+}
+
 func main() {
 	var listNICsOption bool
 
@@ -104,6 +181,8 @@ func main() {
 	}
 
 	flag.Parse()
+
+	initializeExceptions(*serverIP)
 
 	if len(os.Args) < 3 {
 		fmt.Println("Usage:")

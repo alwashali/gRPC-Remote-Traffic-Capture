@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -150,6 +151,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+
+	// Serve the exception list over http
+	go func() {
+
+		fs := http.FileServer(http.Dir("./public"))
+		http.Handle("/", fs)
+
+		log.Println("Listening on :8080...")
+		err := http.ListenAndServe(":8080", nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
 	grpcserver := grpc.NewServer()
 	service.RegisterRemoteCaputreServer(grpcserver, &Server{})
 	fmt.Println("Server started. ")
