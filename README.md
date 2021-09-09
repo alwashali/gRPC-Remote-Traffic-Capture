@@ -15,19 +15,42 @@ $ go run server.go
 ```bash
 $ client.exe 
 
-Usage:
-	-i: Network Card Number, see option -l
-	-r: Remote server IP
-	-l: List NIC names (Useful for Windows)
+usage of client.exe
 
-Example: client -i 2 -r 192.168.100.1
-
+-bytes int
+    	Only grab this number bytes, then exit
+  -count int
+    	Only grab this number packets, then exit
+  -dumppkt
+    	Dump packet
+  -filter string
+    	Capture filter
+  -interface int
+    	try -listNIC before
+  -listNIC
+    	list network cards
+  -promisc
+    	Set promiscuous mode
+  -remote string
+    	Remote Packet Collector IP (default "127.0.0.1")
+  -resolve
+    	Resolve whitelisted domains
+  -seconds int
+    	Exit after specified seconds
+  -snaplen int
+    	Max bytes to capture
+  -stats int
+    	Output statistics every N packets (default 1000)
+  -verbose
+    	Verbose output
+  -whitelist
+    	Use whitelists, default: IP Address only, use resolve for domains
 ```
 
 List Network Cards 
 
 ```bash
-$ client.exe -l 
+$ client.exe -listNIC true
 
 (1)- WAN Miniport (Network Monitor):\Device\NPF_{97B0DD37-56B0-4878-920B-C8D98C796CF3}
 (2)- WAN Miniport (IPv6):\Device\NPF_{394AB733-4FB7-4B71-B477-5B9206465ACD}
@@ -45,5 +68,5 @@ $ client.exe -l
 
 
 ```bash
-$ client.exe -i 5 -r 192.168.0.8 
+$ client.exe -interface 6 -r 192.168.0.8 
 ```
