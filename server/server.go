@@ -43,20 +43,17 @@ type endpoint struct {
 var endpoints []endpoint
 
 func (s *Server) GetReady(ctx context.Context, info *service.EndpointInfo) (*service.Empty, error) {
-
 	fmt.Printf("%s is connecting ... \n", info.IPaddress)
-
 	_, Found := s.GetEndpointInfo(info.IPaddress)
 	if !Found {
 		e := endpoint{
 			Hostname:  info.Hostname,
 			IPAddress: info.IPaddress,
 			TraceFileName: info.Hostname +
-				"-" + info.Interface +
+				"-" +
 				"(" + info.IPaddress + ") ",
 			Packetcount: 0,
 		}
-
 		//Append new endpoint connection to endpoints slice
 		endpoints = append(endpoints, e)
 		fmt.Printf("%s added\n", info.Hostname)
@@ -81,13 +78,13 @@ func (s *Server) Capture(srv service.RemoteCaputre_CaptureServer) error {
 	p, _ := peer.FromContext(ctx)
 	ipaddress := strings.Split(p.Addr.String(), ":")[0]
 	fmt.Println("capture started ", ipaddress)
-	n, Found := s.GetEndpointInfo(ipaddress)
+	endpoint, Found := s.GetEndpointInfo(ipaddress)
 	if !Found {
 		log.Panic()
 		//handle properly
 	}
 	file, err := os.OpenFile(
-		endpoints[n].TraceFileName+time.Now().Format(time.RFC850),
+		endpoints[endpoint].TraceFileName+time.Now().Format(time.RFC850)+".pcap",
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
 	)
 	if err != nil {
@@ -100,18 +97,13 @@ func (s *Server) Capture(srv service.RemoteCaputre_CaptureServer) error {
 	w.WriteFileHeader(snapshotLen, layers.LinkTypeEthernet)
 
 	StreamEnd := make(chan bool)
-	endpoints[n].StreamingNow = true
+	endpoints[endpoint].StreamingNow = true
 	go func() {
 		for {
 
 			// receive data from stream
 			pkt, err := srv.Recv()
 
-			// if err == io.EOF {
-			// 	//to print a message about the stream end
-			// 	StreamEnd <- true
-			// 	return
-			// }
 			if err != nil {
 				//log.Fatalf("Failed to receive the packet : %v", err)
 				StreamEnd <- true
@@ -127,21 +119,22 @@ func (s *Server) Capture(srv service.RemoteCaputre_CaptureServer) error {
 			}
 
 			err = w.WritePacket(metadata.CaptureInfo, pkt.Data)
+
 			if err != nil {
 				fmt.Println(err)
 			}
 
-			endpoints[n].Packetcount++
+			endpoints[endpoint].Packetcount++
 
-			fmt.Printf("Received...\nPacketCount: %d ", endpoints[n].Packetcount)
+			fmt.Printf("Received...\nPacketCount: %d ", endpoints[endpoint].Packetcount)
 
 		}
 
 	}()
 
 	<-StreamEnd
-	log.Printf("stream ended from %s \n", endpoints[n].IPAddress)
-	endpoints[n].StreamingNow = false
+	log.Printf("stream ended from %s \n", endpoints[endpoint].IPAddress)
+	endpoints[endpoint].StreamingNow = false
 	return nil
 
 }
