@@ -3,7 +3,7 @@ Remote trafffic caputre using gRPC and golang
 
 **Server Side**
 
-```bash
+```
 $ go run server.go 
 ```
 
@@ -12,7 +12,7 @@ $ go run server.go
 **Client Side**
 
 
-```bash
+```
 $ client.exe 
 
 usage of client.exe
@@ -49,7 +49,7 @@ usage of client.exe
 
 List Network Cards 
 
-```bash
+```
 $ client.exe -listNIC true
 
 (1)- WAN Miniport (Network Monitor):\Device\NPF_{97B0DD37-56B0-4878-920B-C8D98C796CF3}
@@ -67,6 +67,6 @@ $ client.exe -listNIC true
 ```
 
 
-```bash
+```
 $ client.exe -interface 6 -r 192.168.0.8 
 ```
